@@ -98,13 +98,13 @@ class GPSTimeSeries(object):
 
     def __init__(self, filename, prefix = '.'):
         self._name = None
-        self._date = []
-        self._ux = []
-        self._uy = []
-        self._uz = []
-        self._sigux = []
-        self._siguy = []
-        self._siguz = []
+        self._date_raw = []
+        self._ux_raw = []
+        self._uy_raw = []
+        self._uz_raw = []
+        self._sigux_raw = []
+        self._siguy_raw = []
+        self._siguz_raw = []
 
         with open(os.path.join(prefix, filename), 'r') as file:
             reader = csv.reader(file, delimiter = ',')
@@ -115,23 +115,31 @@ class GPSTimeSeries(object):
                     if match:
                         self._name = match.group(1)
                 elif row[0] != "Datetime":
-                    self._date += [isoparse(row[0])]
-                    self._ux += [float(row[2])]
-                    self._uy += [float(row[1])]
-                    self._uz += [float(row[3])]
-                    self._sigux += [float(row[5])]
-                    self._siguy += [float(row[4])]
-                    self._siguz += [float(row[6])]
+                    self._date_raw += [isoparse(row[0])]
+                    self._ux_raw += [float(row[2])]
+                    self._uy_raw += [float(row[1])]
+                    self._uz_raw += [float(row[3])]
+                    self._sigux_raw += [float(row[5])]
+                    self._siguy_raw += [float(row[4])]
+                    self._siguz_raw += [float(row[6])]
         if self._name is not None:
-            self._date = np.array(self._date, dtype = np.datetime64)
-            self._ux = np.array(self._ux)
-            self._uy = np.array(self._uy)
-            self._uz = np.array(self._uz)
-            self._sigux = np.array(self._sigux)
-            self._siguy = np.array(self._siguy)
-            self._siguz = np.array(self._siguz)
+            self._date_raw = np.array(self._date_raw, dtype = np.datetime64)
+            self._ux_raw = np.array(self._ux_raw)
+            self._uy_raw = np.array(self._uy_raw)
+            self._uz_raw = np.array(self._uz_raw)
+            self._sigux_raw = np.array(self._sigux_raw)
+            self._siguy_raw = np.array(self._siguy_raw)
+            self._siguz_raw = np.array(self._siguz_raw)
         else:
             raise ValueError('File was not parsed correctly.')
+
+        self._date = self._date_raw.copy()
+        self._ux = self._ux_raw.copy()
+        self._uy = self._uy_raw.copy()
+        self._uz = self._uz_raw.copy()
+        self._sigux = self._sigux_raw.copy()
+        self._siguy = self._siguy_raw.copy()
+        self._siguz = self._siguz_raw.copy()
 
         from scipy.signal import detrend
         from scipy.optimize import fsolve
@@ -143,11 +151,20 @@ class GPSTimeSeries(object):
 
             return fsolve(inner_function, 3)
 
-        dates = self._date
-        value_ux = self._ux
-        value_uy = self._uy
-        value_uz = self._uz
+        dates = self._date.copy()
+        value_ux = self._ux.copy()
+        value_uy = self._uy.copy()
+        value_uz = self._uz.copy()
         cleared = False
+
+        indexes = np.array(range(self._ux.size))
+
+        # filter trash:
+        i = np.where(np.logical_and(np.logical_and(np.logical_and(np.logical_and(np.logical_and(value_ux >= -1, value_ux <= 1), value_uy >= -1),value_uy <= 1), value_uz >= -1), value_uz <= 1))
+        value_ux = value_ux[i]
+        value_uy = value_uy[i]
+        value_uz = value_uz[i]
+        indexes = indexes[i]
 
         while not cleared:
             value_ux -= np.mean(value_ux)
@@ -176,9 +193,9 @@ class GPSTimeSeries(object):
                 value_ux = value_ux[i]
                 value_uy = value_uy[i]
                 value_uz = value_uz[i]
-                dates = dates[i]
+                indexes = indexes[i]
 
-        _, indexes, _ = np.intersect1d(self._date, dates, assume_unique = False, return_indices = True)
+        #_, indexes, _ = np.intersect1d(self._date, dates, assume_unique = False, return_indices = True)
         self._ux = self._ux[indexes]
         self._uy = self._uy[indexes]
         self._uz = self._uz[indexes]
@@ -187,7 +204,7 @@ class GPSTimeSeries(object):
         self._siguz = self._siguz[indexes]
         self._date = self._date[indexes]
 
-        dates = (self._date - np.min(self._date)).astype('timedelta64[s]') / (60.0*60.0*24.0*365.0)
+        dates = (self._date - np.min(self._date)).astype('timedelta64[s]').astype('float64') / (60.0*60.0*24.0*365.0)
         G = np.ones((dates.size, 2))
         G[:,1] = dates
         try:
@@ -195,9 +212,9 @@ class GPSTimeSeries(object):
             mx = np.matmul(invKernel, self._ux)
             my = np.matmul(invKernel, self._uy)
             mz = np.matmul(invKernel, self._uz)
-            self._vx = mx[0]
-            self._vy = my[0]
-            self._vz = my[0]
+            self._vx = mx[1]
+            self._vy = my[1]
+            self._vz = mz[1]
 
             self._ux -= np.matmul(G, mx)
             self._uy -= np.matmul(G, my)
